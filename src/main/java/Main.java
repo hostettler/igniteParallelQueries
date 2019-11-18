@@ -1,20 +1,18 @@
 import java.util.Arrays;
 import java.util.List;
-
+import java.util.Objects;
+import java.util.TreeSet;
 import org.apache.ignite.Ignite;
 import org.apache.ignite.IgniteCache;
-import org.apache.ignite.IgniteSystemProperties;
 import org.apache.ignite.Ignition;
 import org.apache.ignite.cache.QueryEntity;
+import org.apache.ignite.cache.affinity.AffinityKeyMapped;
 import org.apache.ignite.cache.query.FieldsQueryCursor;
 import org.apache.ignite.cache.query.SqlFieldsQuery;
 import org.apache.ignite.configuration.CacheConfiguration;
 import org.apache.ignite.configuration.IgniteConfiguration;
-import org.apache.ignite.internal.IgniteProperties;
 
 import static org.apache.ignite.cache.CacheMode.PARTITIONED;
-import static org.apache.ignite.cache.CacheMode.REPLICATED;
-import static org.apache.ignite.cache.CacheMode.LOCAL;
 
 public class Main {
 
@@ -25,10 +23,12 @@ public class Main {
             QueryEntity foo = new QueryEntity(String.class, Foo.class);
             foo.addQueryField("s", String.class.getName(), null);
             foo.addQueryField("i", int.class.getName(), null);
-            QueryEntity bar = new QueryEntity(String.class, Bar.class);
+            QueryEntity bar = new QueryEntity(AffinityKey.class, Bar.class);
+            bar.addQueryField("fooRef", String.class.getName(), null);
+            bar.addQueryField("key", String.class.getName(), null);
             bar.addQueryField("s", String.class.getName(), null);
             bar.addQueryField("i", int.class.getName(), null);
-            bar.addQueryField("fooRef", String.class.getName(), null);
+            bar.setKeyFields(new TreeSet<>(Arrays.asList("key", "fooRef")));
 
             CacheConfiguration<Object, Object> regular = new CacheConfiguration<Object, Object>();
             regular.setCacheMode(PARTITIONED);
@@ -48,10 +48,10 @@ public class Main {
                 String key = String.valueOf(i);
                 
                 regularCache.put("foo" + key, new Foo("foo" + key, i));
-                regularCache.put("bar" + key, new Bar("bar" + key, i, "foo" + (i % 10)));
+                regularCache.put(new AffinityKey("bar" + key, "foo" + (i % 10)), new Bar("bar" + key, i));
                 
                 parallelCache.put("foo" + key, new Foo("foo" + key, i));
-                parallelCache.put("bar" + key, new Bar("bar" + key, i, "foo" + (i % 10)));
+                parallelCache.put(new AffinityKey("bar" + key, "foo" + (i % 10)), new Bar("bar" + key, i));
             }
 
             SqlFieldsQuery query = new SqlFieldsQuery("select f.s, sum(b.i) from Bar b join Foo f on b.fooRef = f.s group by f.s");
@@ -85,17 +85,46 @@ public class Main {
         String s;
         int i;
 
-        String fooRef;
-
         public Bar() {
 
         }
 
-        public Bar(String s, int i, String fooRef) {
+        public Bar(String s, int i) {
             this.s = s;
             this.i = i;
+        }
+
+    }
+
+    static class AffinityKey {
+        /** Key. */
+        String key;
+
+        /** Affinity key. */
+        @AffinityKeyMapped
+        String fooRef;
+
+        /**
+         * @param key Key.
+         * @param fooRef Affinity key.
+         */
+        public AffinityKey(String key, String fooRef) {
+            this.key = key;
             this.fooRef = fooRef;
         }
 
+        @Override public boolean equals(Object o) {
+            if (this == o)
+                return true;
+            if (o == null || getClass() != o.getClass())
+                return false;
+            AffinityKey key1 = (AffinityKey)o;
+            return Objects.equals(key, key1.key) &&
+                Objects.equals(fooRef, key1.fooRef);
+        }
+
+        @Override public int hashCode() {
+            return Objects.hash(key, fooRef);
+        }
     }
 }
